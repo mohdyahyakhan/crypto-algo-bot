@@ -3,6 +3,33 @@ import pandas as pd
 import numpy as np
 import time
 from datetime import datetime
+import pytz
+import json
+import os
+from flask import Flask
+from threading import Thread
+
+# ===== RENDER KE LIYE DUMMY SERVER =====
+app = Flask('')
+
+@app.route('/')
+def home():
+    return "Bot is alive and running"
+
+def run_server():
+    app.run(host='0.0.0.0', port=10000)
+
+Thread(target=run_server).start()
+# =======================================
+
+P_L_FILE = "pnl.json"
+
+# P&L load karo agar file hai
+if os.path.exists(P_L_FILE):
+    with open(P_L_FILE, "r") as f:
+        total_pnl = json.load(f).get("total_pnl", 0.0)
+else:
+    total_pnl = 0.0
 
 # ========== CONFIG ==========
 SYMBOLS = ["TAOUSDT", "BTCUSDT", "HYPEUSDT", "SOLUSDT"]
@@ -15,7 +42,7 @@ SL_PCT = 0.01 # 1% Stop Loss
 
 # Paper Trading State
 positions = {} # Symbol: {entry_price, tp, sl, entry_time}
-total_pnl = 0.0 # Total Paper Trading P&L
+# total_pnl upar load ho gaya hai
 
 # ========== EXCHANGE ==========
 exchange = ccxt.bybit({
@@ -62,6 +89,10 @@ def get_price_data(symbol, timeframe):
         return None
 
 # ========== PAPER TRADE LOGIC ==========
+def save_pnl():
+    with open(P_L_FILE, "w") as f:
+        json.dump({"total_pnl": total_pnl}, f)
+
 def check_exit(symbol, current_price):
     global total_pnl
     if symbol not in positions:
@@ -71,6 +102,7 @@ def check_exit(symbol, current_price):
     if current_price >= pos['tp']:
         pnl_pct = ((current_price/pos['entry_price']-1)*100)
         total_pnl += pnl_pct
+        save_pnl() # P&L save karo
         print(f"🎯 {symbol} TP HIT! PnL:{pnl_pct:.2f}% | Total P&L:{total_pnl:.2f}%")
         log_trade(symbol, pos, current_price, "TP", pnl_pct)
         del positions[symbol]
@@ -78,6 +110,7 @@ def check_exit(symbol, current_price):
     elif current_price <= pos['sl']:
         pnl_pct = ((current_price/pos['entry_price']-1)*100)
         total_pnl += pnl_pct
+        save_pnl() # P&L save karo
         print(f"🛑 {symbol} SL HIT! PnL:{pnl_pct:.2f}% | Total P&L:{total_pnl:.2f}%")
         log_trade(symbol, pos, current_price, "SL", pnl_pct)
         del positions[symbol]
@@ -139,7 +172,8 @@ if __name__ == "__main__":
     print(f"TP: {TP_PCT*100}% | SL: {SL_PCT*100}% | EMA: {EMA_PERIOD}\n")
 
     while True:
-        print(f"\n[{datetime.now().strftime('%H:%M:%S')}] Checking... | Total P&L: {total_pnl:.2f}%")
+        ist_time = datetime.now(pytz.timezone("Asia/Kolkata")).strftime('%H:%M:%S')
+        print(f"\n[{ist_time}] Checking... | Total P&L: {total_pnl:.2f}%")
         for sym in SYMBOLS:
             check_signal(sym)
         time.sleep(CHECK_INTERVAL_SEC)
