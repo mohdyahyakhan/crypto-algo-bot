@@ -8,9 +8,9 @@ import json
 import os
 from flask import Flask
 from threading import Thread
+import sys
 
 # ===== RENDER KE LIYE DUMMY SERVER =====
-import os
 app = Flask('')
 
 @app.route('/')
@@ -18,10 +18,11 @@ def home():
     return "Bot is alive and running"
 
 def run_server():
-    port = int(os.environ.get('PORT', 10000))  # Render ka PORT use karo
+    port = int(os.environ.get('PORT', 10000))
     app.run(host='0.0.0.0', port=port)
 
-Thread(target=run_server).start()
+Thread(target=run_server, daemon=True).start()
+time.sleep(2) # Flask ko start hone ka time de
 # =======================================
 
 P_L_FILE = "pnl.json"
@@ -87,7 +88,7 @@ def get_price_data(symbol, timeframe):
         df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
         return df
     except Exception as e:
-        print(f"Error {symbol}: {e}")
+        print(f"Error {symbol}: {e}", flush=True)
         return None
 
 # ========== PAPER TRADE LOGIC ==========
@@ -105,7 +106,7 @@ def check_exit(symbol, current_price):
         pnl_pct = ((current_price/pos['entry_price']-1)*100)
         total_pnl += pnl_pct
         save_pnl() # P&L save karo
-        print(f"🎯 {symbol} TP HIT! PnL:{pnl_pct:.2f}% | Total P&L:{total_pnl:.2f}%")
+        print(f"🎯 {symbol} TP HIT! PnL:{pnl_pct:.2f}% | Total P&L:{total_pnl:.2f}%", flush=True)
         log_trade(symbol, pos, current_price, "TP", pnl_pct)
         del positions[symbol]
         return True
@@ -113,7 +114,7 @@ def check_exit(symbol, current_price):
         pnl_pct = ((current_price/pos['entry_price']-1)*100)
         total_pnl += pnl_pct
         save_pnl() # P&L save karo
-        print(f"🛑 {symbol} SL HIT! PnL:{pnl_pct:.2f}% | Total P&L:{total_pnl:.2f}%")
+        print(f"🛑 {symbol} SL HIT! PnL:{pnl_pct:.2f}% | Total P&L:{total_pnl:.2f}%", flush=True)
         log_trade(symbol, pos, current_price, "SL", pnl_pct)
         del positions[symbol]
         return True
@@ -128,7 +129,7 @@ def open_position(symbol, entry_price):
         'sl': sl,
         'entry_time': datetime.now().strftime("%Y-%m-%d %H:%M")
     }
-    print(f"🔥 SIGNAL: {symbol} | Entry:{entry_price:.2f} | TP:{tp:.2f} | SL:{sl:.2f}")
+    print(f"🔥 SIGNAL: {symbol} | Entry:{entry_price:.2f} | TP:{tp:.2f} | SL:{sl:.2f}", flush=True)
 
 def log_trade(symbol, pos, exit_price, exit_type, pnl_pct):
     with open("paper_trades.txt", "a") as f:
@@ -161,21 +162,22 @@ def check_signal(symbol):
     prev_st_4h = df_4h['st_dir'].iloc[-2]
     last_st_1h = df_1h['st_dir'].iloc[-1]
 
-    print(f"{symbol}: Price:{last_close_4h:.0f} EMA:{last_ema_4h:.0f} ST:{last_st_4h}", end=" | ")
+    print(f"{symbol}: Price:{last_close_4h:.0f} EMA:{last_ema_4h:.0f} ST:{last_st_4h}", end=" | ", flush=True)
 
     if last_close_4h > last_ema_4h and prev_st_4h == -1 and last_st_4h == 1 and last_st_1h == 1:
         open_position(symbol, last_close_4h)
     else:
-        print("No signal")
+        print("No signal", flush=True)
 
 # ========== MAIN LOOP ==========
 if __name__ == "__main__":
-    print("Bot started. 24/7 Paper Trading Running...")
-    print(f"TP: {TP_PCT*100}% | SL: {SL_PCT*100}% | EMA: {EMA_PERIOD}\n")
+    print("Bot started. 24/7 Paper Trading Running...", flush=True)
+    print(f"TP: {TP_PCT*100}% | SL: {SL_PCT*100}% | EMA: {EMA_PERIOD}\n", flush=True)
 
     while True:
         ist_time = datetime.now(pytz.timezone("Asia/Kolkata")).strftime('%H:%M:%S')
-        print(f"\n[{ist_time}] Checking... | Total P&L: {total_pnl:.2f}%")
+        print(f"\n[{ist_time}] Checking... | Total P&L: {total_pnl:.2f}%", flush=True)
         for sym in SYMBOLS:
             check_signal(sym)
+        sys.stdout.flush() # Extra safety
         time.sleep(CHECK_INTERVAL_SEC)
