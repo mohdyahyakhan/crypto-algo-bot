@@ -35,17 +35,20 @@ else:
     total_pnl = 0.0
 
 # ========== CONFIG ==========
-SYMBOLS = ["TAOUSDT", "BTCUSDT", "HYPEUSDT", "SOLUSDT"]
-TIMEFRAME_4H = "4h"
-TIMEFRAME_1H = "1h"
-CHECK_INTERVAL_SEC = 300 # 5 min
+COINS_CONFIG = {
+    "TAOUSDT": {"main_tf": "4h", "confirm_tf": "1h"},
+    "BTCUSDT": {"main_tf": "4h", "confirm_tf": "1h"},
+    "HYPEUSDT": {"main_tf": "1h", "confirm_tf": "4h"}, # 1H main
+    "SOLUSDT": {"main_tf": "1h", "confirm_tf": "4h"} # 1H main
+}
+SYMBOLS = list(COINS_CONFIG.keys())
+CHECK_INTERVAL_SEC = 600 # 10 min - rate limit se bachne ke liye
 EMA_PERIOD = 50 # Test ke liye 50, real me 300 kar dena
 TP_PCT = 0.02 # 2% Take Profit
 SL_PCT = 0.01 # 1% Stop Loss
 
 # Paper Trading State
 positions = {} # Symbol: {entry_price, tp, sl, entry_time}
-# total_pnl upar load ho gaya hai
 
 # ========== EXCHANGE ==========
 exchange = ccxt.bybit({
@@ -88,7 +91,7 @@ def get_price_data(symbol, timeframe):
         df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
         return df
     except Exception as e:
-        print(f"Error {symbol}: {e}", flush=True)
+        print(f"Error {symbol} {timeframe}: {e}", flush=True)
         return None
 
 # ========== PAPER TRADE LOGIC ==========
@@ -105,7 +108,7 @@ def check_exit(symbol, current_price):
     if current_price >= pos['tp']:
         pnl_pct = ((current_price/pos['entry_price']-1)*100)
         total_pnl += pnl_pct
-        save_pnl() # P&L save karo
+        save_pnl()
         print(f"🎯 {symbol} TP HIT! PnL:{pnl_pct:.2f}% | Total P&L:{total_pnl:.2f}%", flush=True)
         log_trade(symbol, pos, current_price, "TP", pnl_pct)
         del positions[symbol]
@@ -113,7 +116,7 @@ def check_exit(symbol, current_price):
     elif current_price <= pos['sl']:
         pnl_pct = ((current_price/pos['entry_price']-1)*100)
         total_pnl += pnl_pct
-        save_pnl() # P&L save karo
+        save_pnl()
         print(f"🛑 {symbol} SL HIT! PnL:{pnl_pct:.2f}% | Total P&L:{total_pnl:.2f}%", flush=True)
         log_trade(symbol, pos, current_price, "SL", pnl_pct)
         del positions[symbol]
@@ -137,11 +140,15 @@ def log_trade(symbol, pos, exit_price, exit_type, pnl_pct):
 
 # ========== SIGNAL CHECK ==========
 def check_signal(symbol):
-    # Exit check pehle
-    df_1h = get_price_data(symbol, TIMEFRAME_1H)
-    if df_1h is None:
+    config = COINS_CONFIG[symbol]
+    main_tf = config["main_tf"]
+    confirm_tf = config["confirm_tf"]
+
+    # Exit check - hamesha main_tf ke current price se
+    df_main = get_price_data(symbol, main_tf)
+    if df_main is None:
         return
-    current_price = df_1h['close'].iloc[-1]
+    current_price = df_main['close'].iloc[-1]
     if check_exit(symbol, current_price):
         return
 
@@ -149,35 +156,37 @@ def check_signal(symbol):
     if symbol in positions:
         return
 
-    df_4h = get_price_data(symbol, TIMEFRAME_4H)
-    if df_4h is None or len(df_4h) < 2:
+    df_confirm = get_price_data(symbol, confirm_tf)
+    if df_confirm is None or len(df_main) < 2:
         return
 
-    df_4h = calculate_st_ema(df_4h)
-    df_1h = calculate_st_ema(df_1h)
+    df_main = calculate_st_ema(df_main)
+    df_confirm = calculate_st_ema(df_confirm)
 
-    last_close_4h = df_4h['close'].iloc[-1]
-    last_ema_4h = df_4h['ema'].iloc[-1]
-    last_st_4h = df_4h['st_dir'].iloc[-1]
-    prev_st_4h = df_4h['st_dir'].iloc[-2]
-    last_st_1h = df_1h['st_dir'].iloc[-1]
+    last_close_main = df_main['close'].iloc[-1]
+    last_ema_main = df_main['ema'].iloc[-1]
+    last_st_main = df_main['st_dir'].iloc[-1]
+    prev_st_main = df_main['st_dir'].iloc[-2]
+    last_st_confirm = df_confirm['st_dir'].iloc[-1]
 
-    print(f"{symbol}: Price:{last_close_4h:.0f} EMA:{last_ema_4h:.0f} ST:{last_st_4h}", end=" | ", flush=True)
+    print(f"{symbol}[{main_tf}]: Price:{last_close_main:.0f} EMA:{last_ema_main:.0f} ST:{last_st_main}", end=" | ", flush=True)
 
-    if last_close_4h > last_ema_4h and prev_st_4h == -1 and last_st_4h == 1 and last_st_1h == 1:
-        open_position(symbol, last_close_4h)
+    if last_close_main > last_ema_main and prev_st_main == -1 and last_st_main == 1 and last_st_confirm == 1:
+        open_position(symbol, last_close_main)
     else:
         print("No signal", flush=True)
 
 # ========== MAIN LOOP ==========
 if __name__ == "__main__":
     print("Bot started. 24/7 Paper Trading Running...", flush=True)
-    print(f"TP: {TP_PCT*100}% | SL: {SL_PCT*100}% | EMA: {EMA_PERIOD}\n", flush=True)
+    print(f"TP: {TP_PCT*100}% | SL: {SL_PCT*100}% | EMA: {EMA_PERIOD}", flush=True)
+    print(f"Timeframes: TAO/BTC=4H, HYPE/SOL=1H\n", flush=True)
 
     while True:
         ist_time = datetime.now(pytz.timezone("Asia/Kolkata")).strftime('%H:%M:%S')
         print(f"\n[{ist_time}] Checking... | Total P&L: {total_pnl:.2f}%", flush=True)
         for sym in SYMBOLS:
             check_signal(sym)
-        sys.stdout.flush() # Extra safety
+            time.sleep(1) # Rate limit se bachne ke liye 1 sec gap
+        sys.stdout.flush()
         time.sleep(CHECK_INTERVAL_SEC)
